@@ -1,13 +1,16 @@
-import type { Request, EndpointOutput } from '@sveltejs/kit';
-import type { NextApiRequest, NextApiResponse } from 'next';
-import type { ReadOnlyFormData, Headers } from '@sveltejs/kit/types/helper';
+import type { Request, EndpointOutput } from "@sveltejs/kit";
+import type { NextApiRequest, NextApiResponse } from "next";
+import type {
+    ReadOnlyFormData,
+    ResponseHeaders,
+} from "@sveltejs/kit/types/helper";
 
 function ensureLeadingSlash(path: string) {
-    return path.startsWith('/') ? path : `/${path}`;
+    return path.startsWith("/") ? path : `/${path}`;
 }
 
 function buildUrl(host: any, path: any, query: URLSearchParams) {
-    const slashPath = ensureLeadingSlash(path || '/');
+    const slashPath = ensureLeadingSlash(path || "/");
     const urlObj = new URL(`https://${host}${slashPath}`);
     if (typeof query === "string") {
         urlObj.search = query;
@@ -19,15 +22,22 @@ function buildUrl(host: any, path: any, query: URLSearchParams) {
 
 // TODO: Implement caching with WeakMap so that auth0's session cache can be used to best effect, as otherwise we'll be calling this too often
 // Cache should, given the same Svelte request object, always return the same NextApiRequest mimic
-function mkReq(param: Request) : NextApiRequest {
-    const result : any = {
-        method: 'GET',
-        headers: (param.headers ? param.headers : param) as Headers,
-        query: Object.fromEntries(param.query as any),  // TODO: Check whether just plain `param.query` will work here
-        url: buildUrl(param.host || 'localhost', param.path || '/', param.query),
+function mkReq(param: Request): NextApiRequest {
+    const result: any = {
+        method: "GET",
+        headers: (param.headers ? param.headers : param) as ResponseHeaders,
+        query: Object.fromEntries(param.query as any), // TODO: Check whether just plain `param.query` will work here
+        url: buildUrl(
+            param.host || "localhost",
+            param.path || "/",
+            param.query
+        ),
         // TODO: Build "cookies" object since Auth0 will want it
     };
-    if (param.body && typeof (param.body as ReadOnlyFormData).getAll === "function") {
+    if (
+        param.body &&
+        typeof (param.body as ReadOnlyFormData).getAll === "function"
+    ) {
         // Body is a ReadOnlyFormData object from Svelte, but auth0-nextjs will expect a plain object
         result.body = Object.fromEntries(param.body as any);
     } else if (typeof param.body === "string") {
@@ -64,7 +74,10 @@ class ResMimic {
 
     setHeader(key: string, value: any) {
         const oldValue = this.headers.get(key.toLowerCase()) || [];
-        const newValue = typeof value === 'string' ? [...oldValue, value] : [...oldValue, ...value];
+        const newValue =
+            typeof value === "string"
+                ? [...oldValue, value]
+                : [...oldValue, ...value];
         this.headers.set(key.toLowerCase(), newValue);
         return this;
     }
@@ -72,10 +85,10 @@ class ResMimic {
     writeHead(status: number, reason?: any, headers?: any) {
         this.statusCode = status;
         let realHeaders;
-        if (typeof reason === 'string') {
+        if (typeof reason === "string") {
             this.statusMessage = reason;
             realHeaders = headers;
-        } else if (typeof reason === 'object' && !headers) {
+        } else if (typeof reason === "object" && !headers) {
             realHeaders = reason;
         } else {
             realHeaders = headers || {};
@@ -108,35 +121,47 @@ class ResMimic {
 
     json(bodyObj: any) {
         this.bodyObj = bodyObj;
-        this.setHeader('content-type', 'application/json');
+        this.setHeader("content-type", "application/json");
         return this;
     }
 
-    getSvelteResponse() : EndpointOutput {
+    getSvelteResponse(): EndpointOutput {
         const status = this.statusCode;
         const headers: { [key: string]: any } = {};
         for (const [k, v] of this.headers.entries()) {
-            headers[k] = (v.length === 1 ? v[0] : v);
+            headers[k] = v.length === 1 ? v[0] : v;
         }
         const body = this.bodyObj ? this.bodyObj : this.bodyStr;
         return { status, headers, body };
     }
 }
 
-function auth0Wrapper(auth0fn: (req: NextApiRequest, res: NextApiResponse, arg2?: any) => Promise<any>) {
+function auth0Wrapper(
+    auth0fn: (
+        req: NextApiRequest,
+        res: NextApiResponse,
+        arg2?: any
+    ) => Promise<any>
+) {
     return (param: any, auth0FnOptions: any) => {
         const req = mkReq(param);
         const res = new ResMimic();
-        return auth0fn(req, (res as unknown) as NextApiResponse, auth0FnOptions).then(() => { return res.getSvelteResponse(); }).catch((error: any) => ({ status: 500, body: error }));
+        return auth0fn(req, res as unknown as NextApiResponse, auth0FnOptions)
+            .then(() => {
+                return res.getSvelteResponse();
+            })
+            .catch((error: any) => ({ status: 500, body: error }));
     };
 }
 
-function auth0WrapperJson(auth0fn: (req: NextApiRequest, res: NextApiResponse, arg2?: any) => any) {
+function auth0WrapperJson(
+    auth0fn: (req: NextApiRequest, res: NextApiResponse, arg2?: any) => any
+) {
     return (svelteReq: Request, auth0FnOptions?: any) => {
         const req = mkReq(svelteReq);
         const res = new ResMimic();
-        return auth0fn(req, (res as unknown) as NextApiResponse, auth0FnOptions);
+        return auth0fn(req, res as unknown as NextApiResponse, auth0FnOptions);
     };
 }
 
-export { mkReq, ResMimic, auth0Wrapper, auth0WrapperJson }
+export { mkReq, ResMimic, auth0Wrapper, auth0WrapperJson };
